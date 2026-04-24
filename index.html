@@ -198,10 +198,10 @@ canvas#videoCanvas{width:100%;display:block;max-height:240px}
     <div id="tab-create" class="panel">
       <!-- API KEY BANNER -->
       <div id="apiBanner" class="api-banner">
-        <div class="api-banner-title">🔑 Anthropic API Key দরকার</div>
-        <div class="api-banner-sub">AI generation চালু করতে আপনার Anthropic API Key দিন। Key শুধু আপনার ব্রাউজারে সেভ থাকবে।<br><a href="https://console.anthropic.com" target="_blank" style="color:var(--gold)">console.anthropic.com</a> থেকে বিনামূল্যে নিন।</div>
+        <div class="api-banner-title">🔑 Google Gemini API Key দরকার (বিনামূল্যে!)</div>
+        <div class="api-banner-sub">AI generation চালু করতে আপনার Gemini API Key দিন। সম্পূর্ণ বিনামূল্যে! Key শুধু আপনার ব্রাউজারে সেভ থাকবে।<br><a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--gold)">aistudio.google.com</a> → "Get API Key" → "Create API key" ক্লিক করুন।</div>
         <div class="api-input-wrap">
-          <input class="api-input" type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." />
+          <input class="api-input" type="password" id="apiKeyInput" placeholder="AIza..." />
           <button class="api-save-btn" onclick="saveApiKey()">সেভ করুন</button>
         </div>
       </div>
@@ -337,14 +337,13 @@ function getApiKey(){
 }
 function saveApiKey(){
   const key = document.getElementById('apiKeyInput').value.trim();
-  if(!key.startsWith('sk-ant')){
-    toast('❌ সঠিক API Key দিন (sk-ant দিয়ে শুরু)');
+  if(!key.startsWith('AIza') || key.length < 20){
+    toast('❌ সঠিক Gemini API Key দিন (AIza দিয়ে শুরু)');
     return;
   }
   try{ localStorage.setItem('sv_apikey', key); } catch(e){}
   updateApiKeyUI();
   toast('✅ API Key সেভ হয়েছে!');
-  // Re-check generate button
   const script = document.getElementById('scriptInput').value.trim();
   document.getElementById('generateBtn').disabled = script.length < 20;
 }
@@ -431,37 +430,35 @@ document.getElementById('scriptInput').addEventListener('input', function(){
 });
 
 // ═══════════════════════════════════════════════
-// CLAUDE API — সুরক্ষিত (key ব্রাউজারে, কোডে নেই)
+// GEMINI API — বিনামূল্যে, সুরক্ষিত
 // ═══════════════════════════════════════════════
 async function callClaude(prompt, system=''){
   const apiKey = getApiKey();
   if(!apiKey) throw new Error('API Key নেই');
 
-  const r = await fetch('https://api.anthropic.com/v1/messages',{
+  const fullPrompt = system ? `${system}\n\n${prompt}` : prompt;
+
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,{
     method:'POST',
-    headers:{
-      'Content-Type':'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
+    headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      model:'claude-haiku-4-5-20251001', // দ্রুত ও সাশ্রয়ী মডেল
-      max_tokens:1000,
-      system: system || 'You are a video production AI. Respond ONLY with valid JSON, no markdown, no extra text.',
-      messages:[{role:'user',content:prompt}]
+      contents:[{parts:[{text: fullPrompt}]}],
+      generationConfig:{
+        temperature: 0.7,
+        maxOutputTokens: 1000
+      }
     })
   });
 
   if(!r.ok){
     const err = await r.json().catch(()=>({}));
-    if(r.status===401) throw new Error('API Key ভুল বা মেয়াদ শেষ। নতুন Key দিন।');
+    if(r.status===400) throw new Error('API Key ভুল। সঠিক Gemini Key দিন।');
     if(r.status===429) throw new Error('API limit পূর্ণ। কিছুক্ষণ পরে চেষ্টা করুন।');
     throw new Error(err.error?.message || `API Error ${r.status}`);
   }
 
   const d = await r.json();
-  return d.content?.[0]?.text||'';
+  return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 // ═══════════════════════════════════════════════
@@ -480,7 +477,7 @@ async function startGenerate(){
     setProgress(10, '✦ স্ক্রিপ্ট বিশ্লেষণ করা হচ্ছে…');
 
     const raw = await callClaude(
-      `Split this script into 3-5 video scenes. Return JSON array only. Each item: {"id":1,"title":"Scene title","narration":"Spoken text max 20 words","visualDesc":"What to draw for ${selectedOpts.style} style, specific objects and colors, max 20 words","bgColor":"#hex dark color","accentColor":"#hex bright color","duration":3,"emoji":"single relevant emoji"}.\n\nScript: ${script}`
+      `You are a video production AI. Respond ONLY with valid JSON array, no markdown, no extra text.\n\nSplit this script into 3-5 video scenes. Return JSON array only. Each item: {"id":1,"title":"Scene title","narration":"Spoken text max 20 words","visualDesc":"What to draw for ${selectedOpts.style} style, specific objects and colors, max 20 words","bgColor":"#hex dark color","accentColor":"#hex bright color","duration":3,"emoji":"single relevant emoji"}.\n\nScript: ${script}`
     );
 
     try { scenes = JSON.parse(raw.replace(/```json|```/g,'').trim()); }
@@ -492,7 +489,7 @@ async function startGenerate(){
 
     setProgress(60, '📱 সোশ্যাল প্যাকেজ তৈরি হচ্ছে…');
     const mraw = await callClaude(
-      `For this video script create: title (catchy 5-7 words), description (2 sentences), hashtags (8 tags array), thumbnailConcept (10 words visual). Return JSON: {"title","description","hashtags","thumbnailConcept"}.\n\nScript: ${script}`
+      `You are a video production AI. Respond ONLY with valid JSON, no markdown, no extra text.\n\nFor this video script create: title (catchy 5-7 words), description (2 sentences), hashtags (8 tags array), thumbnailConcept (10 words visual). Return JSON: {"title":"...","description":"...","hashtags":["..."],"thumbnailConcept":"..."}.\n\nScript: ${script}`
     );
     try { metaData = JSON.parse(mraw.replace(/```json|```/g,'').trim()); }
     catch { metaData = buildFallbackMeta(script); }
